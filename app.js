@@ -3,7 +3,6 @@
 (async function () {
   const COLORS = ['#e4572e', '#2a9d8f', '#3d5a80', '#e9a23b', '#8e5ad6', '#1b98e0', '#d1495b', '#6a994e', '#c97c5d', '#4f6d7a', '#b5838d', '#00798c'];
   const TYPE_RU = { hitchhiking: 'автостоп', hiking: 'поход', leisure: 'отдых', volunteering: 'волонтёрство', caving: 'спелеология', city: 'город', other: 'другое' };
-  const PREC_RU = { exact: 'точная точка', poi: 'объект', settlement: 'населённый пункт', region: 'регион', unclear: 'неясно' };
   const MODE = {
     flight: { ru: 'перелёт', kind: 'air' },
     ferry: { ru: 'паром', kind: 'sea' },
@@ -17,6 +16,8 @@
     hiking: { ru: 'пешком', kind: 'ground' },
   };
   const $ = id => document.getElementById(id);
+  // «Лаос / Таиланд» (пограничная точка) засчитывается в обе страны
+  const countriesOf = p => (p.country || '').split(/\s*\/\s*/).filter(Boolean);
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const day = iso => (iso || '').slice(0, 10);
   const fmt = iso => { if (!iso) return '—'; const [y, m, d] = day(iso).split('-'); return `${d}.${m}.${y}`; };
@@ -95,7 +96,7 @@
     }
     t._km = t._legs.reduce((s, l) => s + l.km, 0);
     t._roadKm = t._legs.filter(l => l.kind === 'road').reduce((s, l) => s + l.km, 0);
-    t._countries = [...new Set(t._places.map(p => p.country).filter(Boolean))];
+    t._countries = [...new Set(t._places.flatMap(countriesOf))];
   });
 
   // ---------- карта ----------
@@ -107,6 +108,10 @@
   L.control.layers({ 'Мягкая': soft, 'OpenStreetMap': osm, 'Рельеф': topo, 'Спутник': sat }, null, { position: 'topright' }).addTo(map);
   L.control.zoom({ position: 'topright' }).addTo(map);
   L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
+  // анимации камеры: у карты нулевого размера (скрытая вкладка) Leaflet падает на flyTo — тогда без анимации
+  const sized = () => { const s = map.getSize(); return s.x > 0 && s.y > 0; };
+  function flyTo(ll, z, o) { try { if (!sized()) throw 0; map.flyTo(ll, z, o); } catch (e) { map.setView(ll, z, { animate: false }); } }
+  function flyBounds(b, o) { try { if (!sized()) throw 0; map.flyToBounds(b, o); } catch (e) { try { map.fitBounds(b, { ...o, animate: false }); } catch (e2) {} } }
   map.createPane('routes').style.zIndex = 410;
   map.createPane('casing').style.zIndex = 405;
 
@@ -156,7 +161,6 @@
     const t = p._trip, posts = p.posts && p.posts.length ? p.posts : [{ url: p.url, date: p.post_date }];
     const warn = [];
     if (p.confidence === 'low') warn.push('место определено неуверенно');
-    if (p.precision && p.precision !== 'exact' && p.precision !== 'poi') warn.push('точность: ' + (PREC_RU[p.precision] || p.precision));
     if (p.date_is_approx) warn.push('дата приблизительная');
     if (p.coord_source && /external|внешн/i.test(p.coord_source)) warn.push('место определено по внешнему источнику, в посте не названо');
     const img = photoUrl(p.photo), n = t._places.length;
@@ -219,6 +223,7 @@
   const showLow = $('showLow'), joinTrips = $('joinTrips');
 
   let focus = null, drawn = new Set(), animate = false, curP = null;
+  let hl = null, playlist = null; // подсветка и плейлист из разбивок (страна, все места)
   // текущая точка при пошаговом просмотре: пульсирующий маркер и подсветка в списке остановок
   function markCur() {
     document.querySelectorAll('.pin.cur').forEach(e => e.classList.remove('cur', 'pulse'));
@@ -237,9 +242,9 @@
     trips.forEach(t => {
       t._layer.clearLayers();
       if (!t._on) return;
-      const dim = focus && focus !== t;
+      const tripDim = focus && focus !== t, isDim = p => tripDim || (!!hl && !hl.has(p));
       t._markers.forEach(m => {
-        const p = m._p;
+        const p = m._p, dim = isDim(p);
         if (day(p.date) > until || (!showLow.checked && p._low)) return;
         t._layer.addLayer(m);
         if (m._icon) m._icon.style.opacity = dim ? 0.25 : 1;
@@ -248,7 +253,7 @@
       });
       t._legs.forEach((l, i) => {
         if (day(l.b.date) > until) return;
-        const key = t.id + i, fresh = animate && !drawn.has(key);
+        const key = t.id + i, fresh = animate && !drawn.has(key), dim = isDim(l.a) && isDim(l.b);
         t._legLayers[i].forEach(ly => {
           t._layer.addLayer(ly);
           ly.setStyle({ opacity: dim ? 0.18 : ly.options.pane === 'casing' ? 0.9 : l.kind === 'road' ? 0.95 : 0.85 });
@@ -314,11 +319,11 @@
   const syncAll = () => { allBtn.textContent = trips.some(t => t._on) ? 'скрыть все' : 'показать все'; };
   allBtn.addEventListener('click', () => { const on = !trips.some(t => t._on); trips.forEach(t => t._setOn(on)); render(); syncAll(); });
 
-  const countries = new Set(places.map(p => p.country).filter(Boolean));
+  const countries = new Set(places.flatMap(countriesOf));
   const totalKm = trips.reduce((s, t) => s + t._km, 0);
-  $('stats').innerHTML = [[trips.length, plural(trips.length, 'поездка', 'поездки', 'поездок')], [places.length, plural(places.length, 'место', 'места', 'мест')],
-    [countries.size, plural(countries.size, 'страна', 'страны', 'стран')], [num(totalKm), 'км пути']]
-    .map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join('');
+  $('stats').innerHTML = [['trips', trips.length, plural(trips.length, 'поездка', 'поездки', 'поездок')], ['places', places.length, plural(places.length, 'место', 'места', 'мест')],
+    ['countries', countries.size, plural(countries.size, 'страна', 'страны', 'стран')], ['km', num(totalKm), 'км пути']]
+    .map(([k, v, l]) => `<button class="stat" data-view="${k}" title="Подробнее"><b>${v}</b><span>${l}</span></button>`).join('');
   if (dates.length) $('stats').insertAdjacentHTML('afterend', `<div class="range">${fmtNice(dates[0])} — ${fmtNice(dates[dates.length - 1])}</div>`);
 
   function boundsOf(t) { const b = L.latLngBounds(t._places.map(p => [+p.lat, +p.lon])); t._legs.forEach(l => l.pts.forEach(q => b.extend(q))); return b; }
@@ -328,14 +333,14 @@
   function openTrip(t) {
     if (!t._on) t._setOn(true);
     if (dates[+slider.value] < day(t._places[t._places.length - 1].date)) { stop(); slider.value = slider.max; }
-    focus = t;
-    $('listView').classList.add('hidden'); $('tripView').classList.remove('hidden');
+    focus = t; hl = playlist = null; setStatActive(null);
+    $('listView').classList.add('hidden'); $('breakView').classList.add('hidden'); $('tripView').classList.remove('hidden');
     $('tripView').style.setProperty('--c', t._color);
     $('tripHead').innerHTML = `<div class="trip-hero" style="--c:${t._color};${t._cover ? `background-image:url('${esc(t._cover)}')` : ''}"><div><h2>${esc(t.name)}</h2><p>${tripMeta(t)}${t._countries.length ? ' · ' + esc(t._countries.length > 4 ? t._countries.slice(0, 4).join(', ') + ` и ещё ${t._countries.length - 4}` : t._countries.join(', ')) : ''}</p></div></div>
       ${tripChips(t)}${t.note ? `<p class="trip-note">${esc(t.note)}</p>` : ''}`;
     panel.scrollTop = 0;
     render();
-    map.flyToBounds(boundsOf(t), { ...fitOpts(), duration: 0.9 });
+    flyBounds(boundsOf(t), { ...fitOpts(), duration: 0.9 });
   }
   function closeTrip() {
     focus = null; map.closePopup();
@@ -365,9 +370,124 @@
     if (focus !== t) openTrip(t); else render();
     if (isMobile()) panel.classList.add('collapsed');
     curP = p; markCur();
-    map.flyTo([+p.lat, +p.lon], Math.max(map.getZoom(), 9), { duration: 0.8 });
+    flyTo([+p.lat, +p.lon], Math.max(map.getZoom(), 9), { duration: 0.8 });
     map.once('moveend', () => p._m.openPopup());
   }
+  // ---------- разбивки по плиткам статистики: поездки, места, страны, километры ----------
+  const breakBody = $('breakBody');
+  let view = null, openCountry = null, placeQuery = '';
+  function setStatActive(k) { document.querySelectorAll('.stat').forEach(b => b.classList.toggle('active', b.dataset.view === k)); }
+  const byDate = (a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : a._idx - b._idx);
+  const PLAY_ICO = '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>';
+  const placeRow = (p, n) => `<li class="prow" data-pid="${esc(p.id)}" style="--c:${p._trip._color}">
+      <span class="num">${n}</span><span class="pbody"><span class="n">${esc(p.name)}</span><span class="d">${fmtNice(p.date)}${p.country ? ' · ' + esc(p.country) : ''}</span></span></li>`;
+  const placeById = new Map(places.map(p => [p.id, p]));
+
+  // страны: в порядке первого посещения
+  const countryList = [...countries].map(c => {
+    const ps = places.filter(p => countriesOf(p).includes(c)).sort(byDate);
+    return { name: c, places: ps, trips: [...new Set(ps.map(p => p._trip))] };
+  }).sort((a, b) => byDate(a.places[0], b.places[0]));
+
+  function showView(k) {
+    if (focus) { focus = null; $('tripView').classList.add('hidden'); }
+    view = k; setStatActive(k);
+    $('listView').classList.add('hidden'); $('breakView').classList.remove('hidden');
+    hl = playlist = null; openCountry = null;
+    renderView(); render();
+    panel.scrollTop = 0;
+    if (k === 'places') playlist = places.slice().sort(byDate);
+    if (isMobile() && panel.classList.contains('collapsed')) setCollapsed(false);
+  }
+  function closeView() {
+    view = null; hl = playlist = null; openCountry = null; setStatActive(null);
+    $('breakView').classList.add('hidden'); $('listView').classList.remove('hidden');
+    render();
+  }
+  function renderView() {
+    let h = '';
+    if (view === 'trips') {
+      h = `<h2 class="bk-title">Поездки</h2>`;
+      const groups = {};
+      trips.forEach(t => (groups[TYPE_RU[t.type] || t.type || 'другое'] ||= []).push(t));
+      Object.entries(groups).forEach(([g, ts]) => {
+        h += `<div class="bk-group">${esc(g)} <span>${ts.length}</span></div><ul class="bk-list">` + ts.map(t => `
+          <li class="trow" data-trip="${esc(t.id)}" style="--c:${t._color}"><span class="sw"></span>
+            <span class="pbody"><span class="n">${esc(t.name)}</span><span class="d">${tripMeta(t)}</span></span>
+            <span class="val">${t._places.length}<small> ${plural(t._places.length, 'место', 'места', 'мест')}</small><br>${t._countries.length}<small> ${plural(t._countries.length, 'страна', 'страны', 'стран')}</small></span></li>`).join('') + `</ul>`;
+      });
+    } else if (view === 'places') {
+      const q = placeQuery.trim().toLowerCase();
+      const list = places.slice().sort(byDate).filter(p => !q || (p.name + ' ' + (p.country || '') + ' ' + p._trip.name).toLowerCase().includes(q));
+      h = `<div class="bk-head"><h2 class="bk-title">Все места</h2><button class="bk-play" data-play="places">${PLAY_ICO}Пройти все</button></div>
+        <input id="placeSearch" class="bk-search" type="text" placeholder="Поиск: место, страна, поездка" value="${esc(placeQuery)}" autocomplete="off">`;
+      let lastTrip = null, n = 0;
+      h += `<ul class="bk-list">` + list.map(p => {
+        let head = '';
+        if (p._trip !== lastTrip) { lastTrip = p._trip; head = `<li class="bk-sub" style="--c:${p._trip._color}"><span class="sw"></span>${esc(p._trip.name)}</li>`; }
+        return head + placeRow(p, ++n);
+      }).join('') + `</ul>` + (list.length ? '' : `<p class="bk-empty">Ничего не найдено</p>`);
+    } else if (view === 'countries') {
+      h = `<h2 class="bk-title">Страны <span class="bk-note">в порядке первого посещения</span></h2><ul class="bk-list">` + countryList.map((c, i) => {
+        const open = openCountry === c.name;
+        return `<li class="crow${open ? ' open' : ''}" data-country="${esc(c.name)}">
+            <span class="num">${i + 1}</span>
+            <span class="pbody"><span class="n">${esc(c.name)}</span><span class="d">${fmtNice(c.places[0].date)}${day(c.places[0].date) !== day(c.places[c.places.length - 1].date) ? ' — ' + fmtNice(c.places[c.places.length - 1].date) : ''}</span></span>
+            <span class="dots">${c.trips.map(t => `<i style="background:${t._color}" title="${esc(t.name)}"></i>`).join('')}</span>
+            <span class="val">${c.places.length}</span></li>` +
+          (open ? `<li class="cdetail"><button class="bk-play" data-play="country">${PLAY_ICO}Пройти по ${esc(c.name)}</button><ul class="bk-list">${c.places.map((p, j) => placeRow(p, j + 1)).join('')}</ul></li>` : '');
+      }).join('') + `</ul>`;
+    } else if (view === 'km') {
+      const KIND = { road: ['по дорогам', 'на машине, автостопом, автобусом, пешком'], air: ['перелёты', 'по прямой между аэропортами'], sea: ['паромы и лодки', 'по прямой'], straight: ['напрямую', 'где дорогу не удалось построить'] };
+      const sums = {}; trips.forEach(t => t._legs.forEach(l => { sums[l.kind] = (sums[l.kind] || 0) + l.km; }));
+      const max = Math.max(...Object.values(sums), 1);
+      h = `<h2 class="bk-title">${num(totalKm)} км пути</h2><div class="bk-group">По способу</div><ul class="bk-list">` +
+        Object.keys(KIND).filter(k => sums[k]).map(k => `<li class="krow"><span class="pbody"><span class="n">${KIND[k][0]}</span><span class="d">${KIND[k][1]}</span>
+          <span class="bar"><i style="width:${(sums[k] / max) * 100}%"></i></span></span><span class="val">${num(sums[k])}<small> км</small></span></li>`).join('') + `</ul>`;
+      const ts = trips.slice().sort((a, b) => b._km - a._km), tmax = Math.max(ts[0] ? ts[0]._km : 1, 1);
+      h += `<div class="bk-group">По поездкам</div><ul class="bk-list">` + ts.map(t => `<li class="trow krow" data-trip="${esc(t.id)}" style="--c:${t._color}">
+          <span class="pbody"><span class="n">${esc(t.name)}</span><span class="d">${t._roadKm >= 1 ? `по дорогам ≈${num(t._roadKm)} км` : ''}</span>
+          <span class="bar"><i style="width:${(t._km / tmax) * 100}%;background:${t._color}"></i></span></span><span class="val">${num(t._km)}<small> км</small></span></li>`).join('') + `</ul>`;
+    }
+    breakBody.innerHTML = h;
+    const s = $('placeSearch');
+    if (s) s.addEventListener('input', () => { placeQuery = s.value; const pos = s.selectionStart; renderView(); const s2 = $('placeSearch'); s2.focus(); s2.setSelectionRange(pos, pos); });
+  }
+  // показать точку, не переключая панель в режим поездки
+  function showPlace(p) {
+    if (!p._trip._on) p._trip._setOn(true);
+    if (p._low && !showLow.checked) showLow.checked = true;
+    if (day(p.date) > dates[+slider.value]) slider.value = dates.indexOf(day(p.date));
+    pause(); render();
+    curP = p; markCur();
+    if (isMobile()) setCollapsed(true);
+    flyTo([+p.lat, +p.lon], Math.max(map.getZoom(), 9), { duration: 0.8 });
+    map.once('moveend', () => p._m.openPopup());
+  }
+  function fitPlaces(ps) {
+    const b = L.latLngBounds(ps.map(p => [+p.lat, +p.lon]));
+    flyBounds(b, { ...fitOpts(), maxZoom: 9, duration: 0.9 });
+  }
+  $('stats').addEventListener('click', ev => {
+    const b = ev.target.closest('.stat'); if (!b) return;
+    if (view === b.dataset.view) { closeView(); return; }
+    showView(b.dataset.view);
+  });
+  $('breakBack').addEventListener('click', () => { closeView(); fitAll(true); });
+  breakBody.addEventListener('click', ev => {
+    const pl = ev.target.closest('.bk-play');
+    if (pl) { pause(); curP = null; slider.value = slider.max; play(); if (isMobile()) setCollapsed(true); return; }
+    const pr = ev.target.closest('.prow'); if (pr) return showPlace(placeById.get(pr.dataset.pid));
+    const tr = ev.target.closest('.trow'); if (tr) { view = null; $('breakView').classList.add('hidden'); return openTrip(tripById.get(tr.dataset.trip)); }
+    const cr = ev.target.closest('.crow');
+    if (cr) {
+      const c = countryList.find(x => x.name === cr.dataset.country);
+      if (openCountry === c.name) { openCountry = null; hl = playlist = null; }
+      else { openCountry = c.name; hl = new Set(c.places); playlist = c.places; c.trips.forEach(t => t._on || t._setOn(true)); slider.value = slider.max; fitPlaces(c.places); }
+      curP = null; pause(); renderView(); render();
+    }
+  });
+
   map.getContainer().addEventListener('click', ev => {
     const b = ev.target.closest('.pop .nav button'); if (!b) return;
     goTo(tripById.get(b.dataset.trip), +b.dataset.go);
@@ -377,7 +497,7 @@
     const on = trips.filter(t => t._on);
     if (!on.length) return map.setView([55.75, 37.6], 4);
     const b = L.latLngBounds([]); on.forEach(t => b.extend(boundsOf(t)));
-    fly ? map.flyToBounds(b, { ...fitOpts(), maxZoom: 7, duration: 0.9 }) : map.fitBounds(b, { ...fitOpts(), maxZoom: 7 });
+    fly ? flyBounds(b, { ...fitOpts(), maxZoom: 7, duration: 0.9 }) : map.fitBounds(b, { ...fitOpts(), maxZoom: 7 });
   }
 
   // свернуть/развернуть панель
@@ -416,7 +536,7 @@
 
   // последовательность точек: выбранная поездка или все видимые, по времени
   function seq() {
-    const src = focus ? focus._places : trips.filter(t => t._on).flatMap(t => t._places);
+    const src = focus ? focus._places : playlist || trips.filter(t => t._on).flatMap(t => t._places);
     return src.filter(p => showLow.checked || !p._low).sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : a._idx - b._idx));
   }
   function show(p, anim) {
@@ -431,10 +551,7 @@
       map.closePopup();
       waitMove = () => { waitMove = null; markCur(); if (curP === p) p._m.openPopup(); if (playing) schedule(); };
       map.once('moveend', waitMove);
-      const z = Math.min(12, Math.max(map.getZoom(), 8)), sz = map.getSize();
-      // flyTo у Leaflet падает на карте нулевого размера (скрытая вкладка) — тогда без анимации
-      try { if (!sz.x || !sz.y) throw 0; map.flyTo([+p.lat, +p.lon], z, { duration: (far ? 1.6 : 0.9) / Math.sqrt(speed) }); }
-      catch (e) { map.setView([+p.lat, +p.lon], z, { animate: false }); }
+      flyTo([+p.lat, +p.lon], Math.min(12, Math.max(map.getZoom(), 8)), { duration: (far ? 1.6 : 0.9) / Math.sqrt(speed) });
     } else {
       if (!map.getBounds().pad(-0.15).contains([+p.lat, +p.lon])) map.panTo([+p.lat, +p.lon], { duration: 0.5 });
       if (playing) schedule();

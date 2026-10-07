@@ -12,7 +12,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="style.css?v=d8e2964">
+<link rel="stylesheet" href="style.css?v=202610080125">
 </head>
 <body>
 <div id="app">
@@ -34,6 +34,11 @@
     <div id="listView">
       <div class="section-title"><span>Поездки</span><button id="allToggle" class="link-btn">скрыть все</button></div>
       <ul id="trips"></ul>
+    </div>
+
+    <div id="breakView" class="hidden">
+      <button id="breakBack" class="back"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg> Все поездки</button>
+      <div id="breakBody"></div>
     </div>
 
     <div id="tripView" class="hidden">
@@ -71,6 +76,6 @@
   </div>
 </div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="app.js?v=d8e2964"></script>
+<script src="app.js?v=202610080125"></script>
 </body>
 </html>
