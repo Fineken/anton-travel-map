@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Карта путешествий Антона</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <aside id="panel">
+    <header>
+      <h1>Карта путешествий Антона</h1>
+      <p class="sub">По постам канала <a href="https://t.me/Anton_Yabloko" target="_blank" rel="noopener">@Anton_Yabloko</a></p>
+      <button id="togglePanel" aria-label="Свернуть список">☰</button>
+    </header>
+    <div id="dataBadge" class="badge hidden"></div>
+    <div id="stats"></div>
+    <ul id="trips"></ul>
+    <footer>
+      <label><input type="checkbox" id="showLow" checked> показывать неточные места</label>
+      <label><input type="checkbox" id="joinTrips"> соединить поездки одной линией</label>
+    </footer>
+  </aside>
+  <main id="map"></main>
+  <div id="timeline">
+    <button id="play" aria-label="Проиграть маршрут">▶</button>
+    <input type="range" id="slider" min="0" max="0" value="0" step="1" aria-label="Дата">
+    <span id="sliderLabel"></span>
+  </div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
