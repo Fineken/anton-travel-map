@@ -53,14 +53,20 @@
   </button>
 
   <div id="timeline">
-    <button id="play" class="play" aria-label="Проиграть маршрут">
-      <svg class="i-play" viewBox="0 0 24 24" width="18" height="18"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
-      <svg class="i-pause" viewBox="0 0 24 24" width="18" height="18"><path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor"/></svg>
-    </button>
+    <div class="ctl">
+      <button id="prev" class="ctl-btn" aria-label="Предыдущая точка" title="Предыдущая точка (←)"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M6 5h2v14H6zM20 5v14L9 12z" fill="currentColor"/></svg></button>
+      <button id="play" class="play" aria-label="Проиграть маршрут" title="Автопрокрутка (пробел)">
+        <svg class="i-play" viewBox="0 0 24 24" width="18" height="18"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
+        <svg class="i-pause" viewBox="0 0 24 24" width="18" height="18"><path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor"/></svg>
+      </button>
+      <button id="next" class="ctl-btn" aria-label="Следующая точка" title="Следующая точка (→)"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M16 5h2v14h-2zM4 5v14l11-7z" fill="currentColor"/></svg></button>
+    </div>
     <div class="track">
       <input type="range" id="slider" autocomplete="off" min="0" max="0" value="0" step="1" aria-label="Дата">
       <div id="ticks" class="ticks"></div>
     </div>
+    <button id="speed" class="pill-btn" aria-label="Скорость автопрокрутки" title="Скорость автопрокрутки">×1</button>
+    <button id="follow" class="ctl-btn follow" aria-label="Камера следует за маршрутом"><svg viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="3.2" fill="currentColor"/><circle cx="12" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 1.5v3.5M12 19v3.5M1.5 12H5M19 12h3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
     <div class="when"><span id="sliderLabel"></span><small id="sliderPlace"></small></div>
   </div>
 </div>

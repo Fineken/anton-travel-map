@@ -200,3 +200,25 @@ button{font:inherit;color:inherit}
   .leaflet-popup-content{width:260px!important}
   .pop .ph{height:140px}
 }
+
+/* ---------- пошаговый просмотр ---------- */
+#timeline{gap:10px}
+.ctl{display:flex;align-items:center;gap:2px;flex:none}
+.ctl-btn{flex:none;width:34px;height:34px;border-radius:50%;border:0;background:none;color:var(--muted);cursor:pointer;display:grid;place-items:center;transition:background .15s,color .15s}
+.ctl-btn:hover{background:var(--hover);color:var(--text)}
+.ctl-btn.follow.on{color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent)}
+.pill-btn{flex:none;min-width:44px;height:30px;border-radius:999px;border:1px solid var(--line);background:var(--chip);color:var(--text);font-weight:700;font-size:12px;cursor:pointer;font-variant-numeric:tabular-nums}
+.pill-btn:hover{border-color:var(--accent)}
+.pin.cur{transform:scale(1.5)}
+.leaflet-marker-icon:has(.pin.cur){z-index:9999!important}
+.stop.cur{background:color-mix(in srgb,var(--c) 14%,transparent)}
+.stop.cur .dot{background:var(--c)}
+@media (max-width:760px){
+  #timeline{gap:4px}
+  .ctl{gap:0}
+  .ctl-btn{width:28px;height:28px}
+  .pill-btn{min-width:34px;height:26px;font-size:11px}
+  .when{min-width:0}
+  .when small{display:none}
+  #sliderLabel{font-size:12px}
+}

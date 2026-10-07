@@ -218,7 +218,18 @@
   });
   const showLow = $('showLow'), joinTrips = $('joinTrips');
 
-  let focus = null, drawn = new Set(), animate = false;
+  let focus = null, drawn = new Set(), animate = false, curP = null;
+  // текущая точка при пошаговом просмотре: пульсирующий маркер и подсветка в списке остановок
+  function markCur() {
+    document.querySelectorAll('.pin.cur').forEach(e => e.classList.remove('cur', 'pulse'));
+    const el = curP && curP._m.getElement();
+    if (el) el.querySelector('.pin').classList.add('cur', 'pulse');
+    document.querySelectorAll('.stop.cur').forEach(e => e.classList.remove('cur'));
+    if (focus && curP && curP._trip === focus) {
+      const li = document.querySelector(`.stop[data-j="${curP._idx}"]`);
+      if (li) { li.classList.add('cur'); li.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+    }
+  }
   function render() {
     const until = dates[+slider.value] || '9999';
     label.textContent = fmtNice(until);
@@ -253,7 +264,6 @@
       if (t._places.every(p => day(p.date) <= until)) t._layer.addLayer(t._tracks);
     });
     placeLabel.textContent = last ? last.name : '';
-    if (animate && last && !map.getBounds().pad(-0.15).contains([+last.lat, +last.lon])) map.panTo([+last.lat, +last.lon], { duration: 0.5 });
     // линия между поездками: конец одной → начало следующей
     joinLayer.clearLayers();
     if (joinTrips.checked) {
@@ -265,6 +275,7 @@
       joinLayer.addTo(map);
     } else map.removeLayer(joinLayer);
     if (focus) renderStops(until);
+    if (curP) markCur();
   }
 
   // ---------- панель ----------
@@ -353,7 +364,7 @@
     if (p._low && !showLow.checked) showLow.checked = true;
     if (focus !== t) openTrip(t); else render();
     if (isMobile()) panel.classList.add('collapsed');
-  window.matchMedia('(max-width:760px)').addEventListener('change', e => { app.classList.remove('wide'); $('openPanel').classList.add('hidden'); panel.classList.toggle('collapsed', e.matches); });
+    curP = p; markCur();
     map.flyTo([+p.lat, +p.lon], Math.max(map.getZoom(), 9), { duration: 0.8 });
     map.once('moveend', () => p._m.openPopup());
   }
@@ -386,14 +397,91 @@
   showLow.addEventListener('change', render);
   joinTrips.addEventListener('change', render);
 
-  let timer = null; const playBtn = $('play');
-  const stop = () => { clearInterval(timer); timer = null; playBtn.classList.remove('on'); animate = false; };
-  playBtn.addEventListener('click', () => {
-    if (timer) return stop();
-    if (+slider.value >= +slider.max) { slider.value = 0; drawn.clear(); }
-    playBtn.classList.add('on'); animate = true;
-    timer = setInterval(() => { if (+slider.value >= +slider.max) return stop(); slider.value = +slider.value + 1; render(); }, 650);
+  // ---------- проигрывание: шаги по точкам, слежение камерой, скорость ----------
+  const playBtn = $('play'), speedBtn = $('speed'), followBtn = $('follow');
+  const SPEEDS = [0.5, 1, 2, 4];
+  const load = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const save = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+  let speed = SPEEDS.includes(+load('tm-speed')) ? +load('tm-speed') : 1, follow = load('tm-follow') !== '0';
+  let playing = false, timer = null, waitMove = null;
+  function syncCtl() {
+    speedBtn.textContent = '×' + String(speed).replace('.', ',');
+    followBtn.classList.toggle('on', follow);
+    followBtn.title = 'Камера следует за маршрутом: ' + (follow ? 'вкл.' : 'выкл.');
+    followBtn.setAttribute('aria-pressed', follow);
+  }
+  syncCtl();
+  speedBtn.addEventListener('click', () => { speed = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length]; save('tm-speed', speed); syncCtl(); if (playing && !waitMove) schedule(); });
+  followBtn.addEventListener('click', () => { follow = !follow; save('tm-follow', follow ? '1' : '0'); syncCtl(); if (follow && curP) show(curP, false); });
+
+  // последовательность точек: выбранная поездка или все видимые, по времени
+  function seq() {
+    const src = focus ? focus._places : trips.filter(t => t._on).flatMap(t => t._places);
+    return src.filter(p => showLow.checked || !p._low).sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : a._idx - b._idx));
+  }
+  function show(p, anim) {
+    const di = dates.indexOf(day(p.date));
+    curP = p;
+    if (+slider.value !== di) { slider.value = di; animate = anim; render(); animate = false; }
+    markCur();
+    placeLabel.textContent = p.name;
+    if (waitMove) { map.off('moveend', waitMove); waitMove = null; }
+    if (follow) {
+      const far = !map.getBounds().contains([+p.lat, +p.lon]);
+      map.closePopup();
+      waitMove = () => { waitMove = null; markCur(); if (curP === p) p._m.openPopup(); if (playing) schedule(); };
+      map.once('moveend', waitMove);
+      const z = Math.min(12, Math.max(map.getZoom(), 8)), sz = map.getSize();
+      // flyTo у Leaflet падает на карте нулевого размера (скрытая вкладка) — тогда без анимации
+      try { if (!sz.x || !sz.y) throw 0; map.flyTo([+p.lat, +p.lon], z, { duration: (far ? 1.6 : 0.9) / Math.sqrt(speed) }); }
+      catch (e) { map.setView([+p.lat, +p.lon], z, { animate: false }); }
+    } else {
+      if (!map.getBounds().pad(-0.15).contains([+p.lat, +p.lon])) map.panTo([+p.lat, +p.lon], { duration: 0.5 });
+      if (playing) schedule();
+    }
+  }
+  function step(dir) {
+    const s = seq(); if (!s.length) return false;
+    let i = curP ? s.indexOf(curP) : -1;
+    if (i < 0 && +slider.value >= +slider.max) i = dir > 0 ? -1 : s.length; // шкала в конце — «далее» начинает с первой точки
+    else if (i < 0) { // текущей точки нет — отталкиваемся от даты на шкале
+      const until = dates[+slider.value];
+      const last = s.reduce((k, p, j) => (day(p.date) <= until ? j : k), -1);
+      i = dir > 0 ? last : last + 1;
+    }
+    const j = i + dir;
+    if (j < 0 || j >= s.length) return false;
+    show(s[j], dir > 0);
+    return true;
+  }
+  function schedule() {
+    clearTimeout(timer);
+    timer = setTimeout(() => { if (playing && !step(1)) pause(); }, (follow ? 2600 : 700) / speed);
+  }
+  function play() {
+    const s = seq(); if (!s.length) return;
+    playing = true; playBtn.classList.add('on'); playBtn.setAttribute('aria-label', 'Пауза');
+    const i = curP ? s.indexOf(curP) : -1;
+    const atEnd = i === s.length - 1 || (i < 0 && dates[+slider.value] >= day(s[s.length - 1].date));
+    if (atEnd) { // с начала: маршрут рисуется заново
+      drawn.clear(); curP = null;
+      slider.value = Math.max(0, dates.indexOf(day(s[0].date)) - 1); render();
+      show(s[0], true);
+    } else if (!step(1)) pause();
+  }
+  function pause() { playing = false; clearTimeout(timer); playBtn.classList.remove('on'); playBtn.setAttribute('aria-label', 'Проиграть маршрут'); }
+  const stop = pause;
+  playBtn.addEventListener('click', () => (playing ? pause() : play()));
+  $('prev').addEventListener('click', () => { pause(); step(-1); });
+  $('next').addEventListener('click', () => { pause(); step(1); });
+  slider.addEventListener('input', () => { pause(); curP = null; markCur(); });
+  document.addEventListener('keydown', ev => {
+    const el = ev.target instanceof Element ? ev.target : document.body;
+    if (el.closest('input[type=text],textarea,select') || ev.altKey || ev.ctrlKey || ev.metaKey) return;
+    if (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft') { ev.preventDefault(); pause(); step(ev.key === 'ArrowRight' ? 1 : -1); }
+    else if (ev.key === ' ' && !el.closest('button')) { ev.preventDefault(); playing ? pause() : play(); }
   });
+  map.on('dragstart', () => { if (playing && follow) pause(); });
 
   render();
   trips.forEach(t => t._legs.forEach((l, i) => drawn.add(t.id + i)));
