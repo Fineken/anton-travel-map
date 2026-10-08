@@ -262,3 +262,5 @@ button{font:inherit;color:inherit}
 .cdetail .bk-list{padding:0}
 .bar{display:block;height:6px;border-radius:3px;background:var(--chip);margin-top:6px;overflow:hidden}
 .bar i{display:block;height:100%;border-radius:3px;background:var(--accent)}
+.credits{font-size:10.5px;line-height:1.4;color:var(--faint);margin-top:2px}
+.credits a{color:inherit}
